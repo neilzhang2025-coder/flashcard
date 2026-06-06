@@ -65,14 +65,15 @@ export default function EditPage() {
     // Update set name
     await supabase.from('flashcard_sets').update({ name: setName }).eq('id', id)
 
-    // Upsert all cards
-    const toUpsert = cards.map((c, i) => ({
-      ...(c.isNew ? {} : { id: c.id }),
-      set_id: id,
-      question: c.question,
-      answer: c.answer,
-      position: i,
-    }))
+    // Separate new cards (insert) from existing cards (upsert) so PostgreSQL
+    // generates UUIDs for new rows instead of receiving an explicit null id.
+    const existingCards = cards
+      .filter((c) => !c.isNew)
+      .map((c, _i) => ({ id: c.id, set_id: id, question: c.question, answer: c.answer, position: cards.indexOf(c) }))
+
+    const newCards = cards
+      .filter((c) => c.isNew)
+      .map((c) => ({ set_id: id, question: c.question, answer: c.answer, position: cards.indexOf(c) }))
 
     // Get original card ids to find deleted ones
     const { data: origCards } = await supabase
@@ -81,14 +82,25 @@ export default function EditPage() {
       .eq('set_id', id)
 
     const origIds = new Set((origCards ?? []).map((c: { id: string }) => c.id))
-    const keptIds = new Set(cards.filter((c) => !c.isNew).map((c) => c.id))
+    const keptIds = new Set(existingCards.map((c) => c.id))
     const deletedIds = [...origIds].filter((oid) => !keptIds.has(oid))
 
-    const { error: upsertErr } = await supabase.from('flashcards').upsert(toUpsert, { onConflict: 'id' })
-    if (upsertErr) {
-      setError(upsertErr.message)
-      setSaving(false)
-      return
+    if (existingCards.length > 0) {
+      const { error: upsertErr } = await supabase.from('flashcards').upsert(existingCards, { onConflict: 'id' })
+      if (upsertErr) {
+        setError(upsertErr.message)
+        setSaving(false)
+        return
+      }
+    }
+
+    if (newCards.length > 0) {
+      const { error: insertErr } = await supabase.from('flashcards').insert(newCards)
+      if (insertErr) {
+        setError(insertErr.message)
+        setSaving(false)
+        return
+      }
     }
 
     if (deletedIds.length > 0) {
