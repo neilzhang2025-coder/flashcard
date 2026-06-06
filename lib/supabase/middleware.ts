@@ -29,8 +29,8 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   const { pathname } = request.nextUrl
 
-  // Redirect unauthenticated users to /auth (except on /auth itself)
-  if (!user && pathname !== '/auth') {
+  // Redirect unauthenticated users to /auth (except /auth itself and the OAuth callback)
+  if (!user && pathname !== '/auth' && pathname !== '/auth/callback') {
     return NextResponse.redirect(new URL('/auth', request.url))
   }
 
