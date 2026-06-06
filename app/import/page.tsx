@@ -12,12 +12,13 @@ import { useUser } from '@/lib/hooks/useUser'
 type ParsedCard = { question: string; answer: string }
 
 function parseTextToCards(text: string): ParsedCard[] | null {
-  // Try tab, then comma as delimiter
   for (const delim of ['\t', ',', ';']) {
-    const result = Papa.parse<string[]>(text.trim(), { delimiter: delim })
-    const rows = result.data.filter((r) => r.length === 2 && r[0].trim() && r[1].trim())
-    if (rows.length > 0) {
-      return rows.map((r) => ({ question: r[0].trim(), answer: r[1].trim() }))
+    const result = Papa.parse<string[]>(text.trim(), { delimiter: delim, header: false })
+    const rows = result.data as string[][]
+    // Skip first row (header)
+    const dataRows = rows.slice(1).filter((r) => r.length === 2 && r[0].trim() && r[1].trim())
+    if (dataRows.length > 0) {
+      return dataRows.map((r) => ({ question: r[0].trim(), answer: r[1].trim() }))
     }
   }
   return null
@@ -43,10 +44,17 @@ export default function ImportPage() {
     setPreview(null)
 
     Papa.parse<string[]>(file, {
+      header: true,        // treats row 1 as header, skips it from data
+      skipEmptyLines: true,
       complete(result) {
-        const rows = result.data.filter((r) => r.length >= 2 && r[0].trim() && r[1].trim())
+        // result.data rows are objects keyed by header; grab first two field values
+        const rows = (result.data as unknown as Record<string, string>[]).map((row) => {
+          const vals = Object.values(row)
+          return [vals[0] ?? '', vals[1] ?? '']
+        }).filter((r) => r[0].trim() && r[1].trim())
+
         if (rows.length === 0) {
-          setParseError('No valid rows found. File must have exactly 2 columns: question and answer.')
+          setParseError('No valid rows found after the header. File must have 2 columns: question and answer.')
           return
         }
         setPreview(rows.map((r) => ({ question: r[0].trim(), answer: r[1].trim() })))
@@ -54,7 +62,6 @@ export default function ImportPage() {
       error(err) {
         setParseError(`Parse error: ${err.message}`)
       },
-      skipEmptyLines: true,
     })
   }
 
@@ -111,6 +118,18 @@ export default function ImportPage() {
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Import Flashcards</h1>
 
+        {/* Set name — always visible at the top */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Set name</label>
+          <input
+            type="text"
+            value={setName}
+            onChange={(e) => setSetName(e.target.value)}
+            placeholder="e.g. Spanish Vocabulary"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+
         {/* Tab selector */}
         <div className="flex rounded-lg bg-gray-100 p-1 mb-6 w-fit">
           {(['csv', 'paste'] as const).map((t) => (
@@ -129,7 +148,7 @@ export default function ImportPage() {
         {tab === 'csv' && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Upload a <strong>.csv</strong> file with 2 columns: <code className="bg-gray-100 px-1 rounded">question</code> and <code className="bg-gray-100 px-1 rounded">answer</code>. Comma, tab, or semicolon separated.
+              Upload a <strong>.csv</strong> file with 2 columns: <code className="bg-gray-100 px-1 rounded">question</code> and <code className="bg-gray-100 px-1 rounded">answer</code>. The first row is treated as a header and skipped.
             </p>
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-10 cursor-pointer hover:border-indigo-400 transition-colors bg-white">
               <span className="text-3xl mb-2">📂</span>
@@ -149,10 +168,11 @@ export default function ImportPage() {
         {tab === 'paste' && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Paste rows with question and answer separated by a <strong>tab</strong> or <strong>comma</strong>. One card per line.
+              Paste rows with question and answer separated by a <strong>tab</strong> or <strong>comma</strong>. The first row is treated as a header and skipped.
             </p>
             <pre className="text-xs bg-gray-100 rounded-lg px-4 py-3 text-gray-600">
-{`What is the capital of France?\tParis
+{`question\tanswer
+What is the capital of France?\tParis
 Largest planet in solar system?\tJupiter`}
             </pre>
             <textarea
@@ -171,11 +191,9 @@ Largest planet in solar system?\tJupiter`}
 
         {preview && (
           <div className="mt-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-gray-800">
-                Preview — {preview.length} card{preview.length !== 1 ? 's' : ''} detected
-              </h2>
-            </div>
+            <h2 className="font-semibold text-gray-800">
+              Preview — {preview.length} card{preview.length !== 1 ? 's' : ''} detected
+            </h2>
 
             <div className="overflow-auto rounded-xl border border-gray-200 bg-white">
               <table className="w-full text-sm">
@@ -205,21 +223,11 @@ Largest planet in solar system?\tJupiter`}
               </table>
             </div>
 
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Set name</label>
-                <input
-                  type="text"
-                  value={setName}
-                  onChange={(e) => setSetName(e.target.value)}
-                  placeholder="e.g. Spanish Vocabulary"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+            <div className="flex justify-end">
               <button
                 onClick={handleImport}
                 disabled={!setName.trim() || saving}
-                className="px-5 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+                className="px-5 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors"
               >
                 {saving ? 'Saving…' : `Import ${preview.length} Cards`}
               </button>
