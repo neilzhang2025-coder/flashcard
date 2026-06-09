@@ -205,6 +205,10 @@ export default function StudyPage() {
   const pageStyle = activeTheme.dot
     ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: activeTheme.base }
     : { backgroundColor: activeTheme.base }
+  // Card face: same dot pattern but always on white so the card stays readable and visually distinct from the page
+  const cardFaceStyle = activeTheme.dot
+    ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: '#ffffff' }
+    : {}
 
   const n_correct = cards.filter((c) => c.status === 'correct').length
   const n_wrong   = cards.filter((c) => c.status === 'wrong').length
@@ -404,6 +408,7 @@ export default function StudyPage() {
                     <div
                       className="card-face absolute inset-0 bg-white rounded-2xl border-2 flex flex-col items-center justify-center p-8 text-center"
                       style={{
+                        ...cardFaceStyle,
                         backfaceVisibility: 'hidden',
                         WebkitBackfaceVisibility: 'hidden',
                         borderColor: currentCard.status === 'correct' ? '#22c55e' :
