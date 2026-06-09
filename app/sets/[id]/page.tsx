@@ -12,6 +12,14 @@ import type { CardWithProgress, CardStatus } from '@/lib/types'
 
 type SetMeta = { id: string; name: string }
 
+const THEMES = [
+  { key: 'default',  label: 'Default',   base: '#f9fafb', dot: null },
+  { key: 'warm',     label: 'Warm',      base: '#fffbeb', dot: 'rgba(217,119,6,0.20)' },
+  { key: 'sage',     label: 'Sage',      base: '#f0fdf4', dot: 'rgba(22,163,74,0.18)' },
+  { key: 'ocean',    label: 'Ocean',     base: '#f0f9ff', dot: 'rgba(14,165,233,0.18)' },
+  { key: 'lavender', label: 'Lavender',  base: '#faf5ff', dot: 'rgba(147,51,234,0.18)' },
+] as const
+
 export default function StudyPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -26,6 +34,24 @@ export default function StudyPage() {
   const [shuffle, setShuffle] = useState(false)
   const [wrongOnly, setWrongOnly] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  const [theme, setTheme] = useState<(typeof THEMES)[number]['key']>(() =>
+    typeof window !== 'undefined' ? (localStorage.getItem('studyTheme') as (typeof THEMES)[number]['key']) ?? 'default' : 'default'
+  )
+
+  function changeTheme(key: (typeof THEMES)[number]['key']) {
+    setTheme(key)
+    localStorage.setItem('studyTheme', key)
+  }
+
+  // Save-wrong-cards modal state
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [saveMode, setSaveMode] = useState<'new' | 'existing'>('new')
+  const [newSetName, setNewSetName] = useState('')
+  const [existingSets, setExistingSets] = useState<SetMeta[]>([])
+  const [selectedSetId, setSelectedSetId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveResult, setSaveResult] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     if (!user) return
@@ -103,6 +129,65 @@ export default function StudyPage() {
     buildOrder(cards, true, shuffle)
   }
 
+  async function openSaveWrongModal() {
+    setSaveMode('new')
+    setNewSetName(`${setMeta?.name ?? 'Set'} — Wrong Cards`)
+    setSaveResult(null)
+    setShowSaveModal(true)
+    const { data } = await supabase
+      .from('flashcard_sets')
+      .select('id, name')
+      .eq('user_id', user?.id)
+      .neq('id', id)
+      .order('updated_at', { ascending: false })
+    setExistingSets(data ?? [])
+    if (data?.[0]) setSelectedSetId(data[0].id)
+  }
+
+  async function saveWrongCards() {
+    if (!user) return
+    const wrongCards = cards.filter((c) => c.status === 'wrong')
+    if (wrongCards.length === 0) return
+    setSaving(true)
+    try {
+      if (saveMode === 'new') {
+        const name = newSetName.trim() || `${setMeta?.name} — Wrong Cards`
+        const { data: newSet, error } = await supabase
+          .from('flashcard_sets')
+          .insert({ user_id: user.id, name })
+          .select('id')
+          .single()
+        if (error || !newSet) throw error
+        await supabase.from('flashcards').insert(
+          wrongCards.map((c, i) => ({ set_id: newSet.id, question: c.question, answer: c.answer, position: i }))
+        )
+        setSaveResult(`Created "${name}" with ${wrongCards.length} card${wrongCards.length !== 1 ? 's' : ''}.`)
+      } else {
+        if (!selectedSetId) return
+        const { data: existing } = await supabase
+          .from('flashcards')
+          .select('question, position')
+          .eq('set_id', selectedSetId)
+        const existingQuestions = new Set((existing ?? []).map((c: { question: string }) => c.question))
+        const maxPos = existing?.length ?? 0
+        const toAdd = wrongCards.filter((c) => !existingQuestions.has(c.question))
+        if (toAdd.length === 0) {
+          setSaveResult('All wrong cards are already in that set.')
+          setSaving(false)
+          return
+        }
+        await supabase.from('flashcards').insert(
+          toAdd.map((c, i) => ({ set_id: selectedSetId, question: c.question, answer: c.answer, position: maxPos + i }))
+        )
+        const skipped = wrongCards.length - toAdd.length
+        setSaveResult(`Added ${toAdd.length} card${toAdd.length !== 1 ? 's' : ''}${skipped > 0 ? ` (${skipped} already existed)` : ''}.`)
+      }
+    } catch {
+      setSaveResult('Something went wrong. Please try again.')
+    }
+    setSaving(false)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -116,6 +201,11 @@ export default function StudyPage() {
     ? cards[studyOrder[cursor]]
     : null
 
+  const activeTheme = THEMES.find((t) => t.key === theme) ?? THEMES[0]
+  const pageStyle = activeTheme.dot
+    ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: activeTheme.base }
+    : { backgroundColor: activeTheme.base }
+
   const n_correct = cards.filter((c) => c.status === 'correct').length
   const n_wrong   = cards.filter((c) => c.status === 'wrong').length
   const n_unseen  = cards.filter((c) => c.status === 'unseen').length
@@ -124,7 +214,7 @@ export default function StudyPage() {
   const progress  = cards.length > 0 ? reviewed / cards.length : 0
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col" style={pageStyle}>
       <Navbar email={email} />
 
       <div className="flex-1 flex flex-col lg:flex-row max-w-6xl mx-auto w-full px-4 py-6 gap-6">
@@ -193,12 +283,20 @@ export default function StudyPage() {
             </button>
 
             {n_wrong > 0 && (
-              <button
-                onClick={studyWrongOnly}
-                className="w-full text-sm text-red-600 border border-red-200 rounded-lg py-2 hover:bg-red-50 transition-colors"
-              >
-                Study {n_wrong} Wrong Cards
-              </button>
+              <>
+                <button
+                  onClick={studyWrongOnly}
+                  className="w-full text-sm text-red-600 border border-red-200 rounded-lg py-2 hover:bg-red-50 transition-colors"
+                >
+                  Study {n_wrong} Wrong Cards
+                </button>
+                <button
+                  onClick={openSaveWrongModal}
+                  className="w-full text-sm text-orange-600 border border-orange-200 rounded-lg py-2 hover:bg-orange-50 transition-colors"
+                >
+                  Save Wrong Cards to Set
+                </button>
+              </>
             )}
 
             <Link
@@ -207,6 +305,23 @@ export default function StudyPage() {
             >
               ✏️ Edit Set
             </Link>
+
+            <div className="pt-1">
+              <p className="text-xs text-gray-400 mb-2">Background</p>
+              <div className="flex gap-2">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => changeTheme(t.key)}
+                    title={t.label}
+                    className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
+                      theme === t.key ? 'border-indigo-500 scale-110' : 'border-gray-300'
+                    }`}
+                    style={{ backgroundColor: t.base }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -228,12 +343,20 @@ export default function StudyPage() {
                   Start Over
                 </button>
                 {n_wrong > 0 && (
-                  <button
-                    onClick={studyWrongOnly}
-                    className="px-5 py-2.5 border border-red-300 text-red-600 font-medium rounded-lg hover:bg-red-50 transition-colors"
-                  >
-                    Retry {n_wrong} Wrong
-                  </button>
+                  <>
+                    <button
+                      onClick={studyWrongOnly}
+                      className="px-5 py-2.5 border border-red-300 text-red-600 font-medium rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      Retry {n_wrong} Wrong
+                    </button>
+                    <button
+                      onClick={openSaveWrongModal}
+                      className="px-5 py-2.5 border border-orange-300 text-orange-600 font-medium rounded-lg hover:bg-orange-50 transition-colors"
+                    >
+                      Save Wrong Cards to Set
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -357,6 +480,77 @@ export default function StudyPage() {
           )}
         </div>
       </div>
+
+      {/* Save wrong cards modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">Save {cards.filter(c => c.status === 'wrong').length} Wrong Cards to Set</h3>
+
+            {/* Mode toggle */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSaveMode('new')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${saveMode === 'new' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              >
+                New Set
+              </button>
+              <button
+                onClick={() => setSaveMode('existing')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${saveMode === 'existing' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              >
+                Existing Set
+              </button>
+            </div>
+
+            {saveMode === 'new' ? (
+              <input
+                type="text"
+                value={newSetName}
+                onChange={(e) => setNewSetName(e.target.value)}
+                placeholder="Set name"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+            ) : (
+              existingSets.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-2">No other sets found.</p>
+              ) : (
+                <select
+                  value={selectedSetId}
+                  onChange={(e) => setSelectedSetId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                  {existingSets.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              )
+            )}
+
+            {saveResult && (
+              <p className="text-sm text-center text-gray-600 bg-gray-50 rounded-lg py-2 px-3">{saveResult}</p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setShowSaveModal(false); setSaveResult(null) }}
+                className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                {saveResult ? 'Close' : 'Cancel'}
+              </button>
+              {!saveResult && (
+                <button
+                  onClick={saveWrongCards}
+                  disabled={saving || (saveMode === 'existing' && existingSets.length === 0)}
+                  className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
