@@ -205,10 +205,10 @@ export default function StudyPage() {
   const pageStyle = activeTheme.dot
     ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: activeTheme.base }
     : { backgroundColor: activeTheme.base }
-  // Card face: same dot pattern but always on white so the card stays readable and visually distinct from the page
-  const cardFaceStyle = activeTheme.dot
-    ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: '#ffffff' }
-    : {}
+  // Card face: theme base color + slightly stronger dots so the pattern is clearly visible
+  const cardFaceStyle: React.CSSProperties = activeTheme.dot
+    ? { backgroundColor: activeTheme.base, backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot.replace(/[\d.]+\)$/, '0.35)')} 1px, transparent 0)`, backgroundSize: '20px 20px' }
+    : { backgroundColor: activeTheme.base }
 
   const n_correct = cards.filter((c) => c.status === 'correct').length
   const n_wrong   = cards.filter((c) => c.status === 'wrong').length
