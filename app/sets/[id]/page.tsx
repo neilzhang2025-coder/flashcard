@@ -13,11 +13,11 @@ import type { CardWithProgress, CardStatus } from '@/lib/types'
 type SetMeta = { id: string; name: string }
 
 const THEMES = [
-  { key: 'default',  label: 'Default',   base: '#f9fafb', dot: null },
-  { key: 'warm',     label: 'Warm',      base: '#fffbeb', dot: 'rgba(217,119,6,0.20)' },
-  { key: 'sage',     label: 'Sage',      base: '#f0fdf4', dot: 'rgba(22,163,74,0.18)' },
-  { key: 'ocean',    label: 'Ocean',     base: '#f0f9ff', dot: 'rgba(14,165,233,0.18)' },
-  { key: 'lavender', label: 'Lavender',  base: '#faf5ff', dot: 'rgba(147,51,234,0.18)' },
+  { key: 'default',  label: 'Default',   base: '#dde3ea', dot: null },
+  { key: 'warm',     label: 'Warm',      base: '#fde68a', dot: 'rgba(180,83,9,0.40)' },
+  { key: 'sage',     label: 'Sage',      base: '#a7f3d0', dot: 'rgba(4,120,87,0.35)' },
+  { key: 'ocean',    label: 'Ocean',     base: '#bae6fd', dot: 'rgba(7,89,133,0.35)' },
+  { key: 'lavender', label: 'Lavender',  base: '#e9d5ff', dot: 'rgba(109,40,217,0.35)' },
 ] as const
 
 export default function StudyPage() {
@@ -38,10 +38,31 @@ export default function StudyPage() {
   const [theme, setTheme] = useState<(typeof THEMES)[number]['key']>(() =>
     typeof window !== 'undefined' ? (localStorage.getItem('studyTheme') as (typeof THEMES)[number]['key']) ?? 'default' : 'default'
   )
+  const [bgImage, setBgImage] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('studyBgImage') : null
+  )
 
   function changeTheme(key: (typeof THEMES)[number]['key']) {
     setTheme(key)
     localStorage.setItem('studyTheme', key)
+  }
+
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string
+      setBgImage(dataUrl)
+      try { localStorage.setItem('studyBgImage', dataUrl) } catch { /* storage full, ignore */ }
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  function clearBgImage() {
+    setBgImage(null)
+    localStorage.removeItem('studyBgImage')
   }
 
   // Save-wrong-cards modal state
@@ -202,13 +223,16 @@ export default function StudyPage() {
     : null
 
   const activeTheme = THEMES.find((t) => t.key === theme) ?? THEMES[0]
-  const pageStyle = activeTheme.dot
-    ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: activeTheme.base }
-    : { backgroundColor: activeTheme.base }
-  // Card face: theme base color + slightly stronger dots so the pattern is clearly visible
-  const cardFaceStyle: React.CSSProperties = activeTheme.dot
-    ? { backgroundColor: activeTheme.base, backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot.replace(/[\d.]+\)$/, '0.35)')} 1px, transparent 0)`, backgroundSize: '20px 20px' }
-    : { backgroundColor: activeTheme.base }
+  const pageStyle: React.CSSProperties = bgImage
+    ? { backgroundImage: `url(${bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : activeTheme.dot
+      ? { backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot} 1px, transparent 0)`, backgroundSize: '24px 24px', backgroundColor: activeTheme.base }
+      : { backgroundColor: activeTheme.base }
+  const cardFaceStyle: React.CSSProperties = bgImage
+    ? { backgroundColor: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(2px)' }
+    : activeTheme.dot
+      ? { backgroundColor: activeTheme.base, backgroundImage: `radial-gradient(circle at 2px 2px, ${activeTheme.dot.replace(/[\d.]+\)$/, '0.35)')} 1px, transparent 0)`, backgroundSize: '20px 20px' }
+      : { backgroundColor: activeTheme.base }
 
   const n_correct = cards.filter((c) => c.status === 'correct').length
   const n_wrong   = cards.filter((c) => c.status === 'wrong').length
@@ -312,18 +336,37 @@ export default function StudyPage() {
 
             <div className="pt-1">
               <p className="text-xs text-gray-400 mb-2">Background</p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap items-center">
                 {THEMES.map((t) => (
                   <button
                     key={t.key}
                     onClick={() => changeTheme(t.key)}
                     title={t.label}
                     className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
-                      theme === t.key ? 'border-indigo-500 scale-110' : 'border-gray-300'
+                      !bgImage && theme === t.key ? 'border-indigo-500 scale-110' : 'border-gray-300'
                     }`}
                     style={{ backgroundColor: t.base }}
                   />
                 ))}
+                <label
+                  title="Custom image"
+                  className={`w-6 h-6 rounded-full border-2 cursor-pointer overflow-hidden transition-transform hover:scale-110 flex items-center justify-center text-xs ${
+                    bgImage ? 'border-indigo-500 scale-110' : 'border-gray-300 bg-gray-100'
+                  }`}
+                  style={bgImage ? { backgroundImage: `url(${bgImage})`, backgroundSize: 'cover' } : {}}
+                >
+                  {!bgImage && <span className="text-gray-400 leading-none">＋</span>}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                </label>
+                {bgImage && (
+                  <button
+                    onClick={clearBgImage}
+                    title="Remove image"
+                    className="w-6 h-6 rounded-full border-2 border-red-300 bg-red-50 text-red-400 text-xs flex items-center justify-center hover:bg-red-100 transition-colors"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -416,7 +459,7 @@ export default function StudyPage() {
                       }}
                     >
                       <p className="text-xs uppercase tracking-widest text-gray-400 mb-4">Question</p>
-                      <p className="text-xl font-semibold text-gray-900 leading-relaxed">
+                      <p className="text-4xl font-semibold text-gray-900 leading-relaxed">
                         {currentCard.question}
                       </p>
                       <p className="text-xs text-gray-400 mt-6">Click to flip</p>
@@ -432,7 +475,7 @@ export default function StudyPage() {
                       }}
                     >
                       <p className="text-xs uppercase tracking-widest text-indigo-400 mb-4">Answer</p>
-                      <p className="text-xl font-semibold text-indigo-900 leading-relaxed">
+                      <p className="text-4xl font-semibold text-indigo-900 leading-relaxed">
                         {currentCard.answer}
                       </p>
                     </div>
